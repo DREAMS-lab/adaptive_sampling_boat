@@ -1,0 +1,11 @@
+ament_copyright==0.12.15
+ament_flake8==0.12.15
+ament_pep257==0.12.15
+launch_ros==0.19.13
+pyserial==3.5
+pytest==6.2.5
+rcl_interfaces==1.2.2
+rclpy==3.3.20
+sensor_msgs==4.9.1
+setuptools==59.6.0
+std_msgs==4.9.1
