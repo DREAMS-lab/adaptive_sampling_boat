@@ -24,7 +24,7 @@ setup(
     },
     entry_points={
         'console_scripts': [
-        'winch = winch.roswinch.py:main',
+        'winch = winch.roswinch:main',
         ],
     },
 )

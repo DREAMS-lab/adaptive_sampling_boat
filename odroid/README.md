@@ -68,8 +68,8 @@ to the correct device regardless of plug order.
 ### 4. Python venv for the FT232H winch
 
 ```bash
-python3 -m venv ~/ros2venv
-source ~/ros2venv/bin/activate
+python3 -m venv ~/ros2env
+source ~/ros2env/bin/activate
 pip install pyftdi adafruit-blinka pyusb
 ```
 
@@ -86,7 +86,7 @@ source install/setup.bash
 ### Single command — recommended
 
 ```bash
-source ~/ros2venv/bin/activate
+source ~/ros2env/bin/activate
 source /opt/ros/<ros2_version>/setup.bash
 source ~/ros2_ws/install/setup.bash
 

@@ -20,6 +20,7 @@ setup(
     tests_require=['pytest'],
     entry_points={
         'console_scripts': [
+            'read_serial = sonde_read.read_serial:main',
         ],
     },
 )
