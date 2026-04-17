@@ -1,0 +1,3 @@
+[submodule "scripts/external/mavros"]
+	path = scripts/external/mavros
+	url = git@github.com:mavlink/mavros.git
