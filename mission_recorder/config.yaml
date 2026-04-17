@@ -1,0 +1,18 @@
+# Config for record_bag.sh
+#
+# Override any of these at runtime by exporting them as env vars:
+#   LOCAL_HOST=10.0.0.5 ./record_bag.sh
+
+# The laptop that receives the rosbag from the boat
+local_user: linuxlab
+local_host: 192.168.1.10
+local_base: ~/boat/boat_results/mission_bags
+
+# The boat's Odroid that runs the ros2 bag record
+remote_user: odroid
+rosbag_base: ~/rosbags
+
+# Passed straight to `ros2 bag record`.
+# Use "-a" to record every topic, or a space-separated list of topics.
+record_topics: "-a"
+storage_format: mcap
