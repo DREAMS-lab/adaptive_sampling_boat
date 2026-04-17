@@ -1,0 +1,17 @@
+# Configuration for process_mission.py.
+# CLI flags override these values.
+
+topics:
+  gps: /mavros/global_position/global
+  sonar: /ping1d/data
+  sonde: /sonde_data
+
+# Constant offset added to every sonar reading (sonar zero-point → water surface).
+sonar_offset: 0.0
+
+# Warn if a nearest-neighbour timestamp match exceeds this gap (seconds).
+# Helps detect clock drift between boat and laptop.
+max_time_gap_seconds: 2.0
+
+# Where to write CSVs, maps, figures. Relative paths resolve to cwd.
+output_dir: ./output
