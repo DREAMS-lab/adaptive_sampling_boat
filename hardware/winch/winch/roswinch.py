@@ -33,6 +33,25 @@ class WinchMissionNode(Node):
         super().__init__('winch_mission_node')
 
         # ==================================================
+        # PARAMETERS (see config/winch.yaml)
+        # ==================================================
+
+        self.declare_parameter('sonar_shift', 0.1651)
+        self.declare_parameter('winch_limit_threshold', 1.0)
+        self.declare_parameter('final_winch', 12.0)
+        self.declare_parameter('diameter', 0.2032)
+        self.declare_parameter('num_mag', 20)
+        self.declare_parameter('max_speed', 0.8)
+        self.declare_parameter('min_speed', 0.35)
+        self.declare_parameter('waiting_time', 3)
+        self.declare_parameter('error_threshold', 0.05)
+        self.declare_parameter('stall_timeout_cycles', 20)
+        self.declare_parameter('encoder_jump_threshold', 0.5)
+        self.declare_parameter('battery_threshold', 0.3)
+        self.declare_parameter('watchdog_timeout', 0.5)
+        self.declare_parameter('frequency', 20)
+
+        # ==================================================
         # MAVROS COMMAND CLIENTS
         # ==================================================
 
@@ -91,26 +110,26 @@ class WinchMissionNode(Node):
         # ==================================================
 
         self.state = "HOME_WINCH"   # ← Start with homing procedure
-        self.frequency = 20
+        self.frequency = self.get_parameter('frequency').value
         self.timer = self.create_timer(1/self.frequency,
                                        self.timer_callback)
 
         # ==================================================
         # BATTERY
         # ==================================================
-        
+
         self.low_battery = False
-        self.battery_threshold = 0.3 # This is normalized, corresponding to 30% battery
-        
-        
+        self.battery_threshold = self.get_parameter('battery_threshold').value
+
+
         # ==================================================
         # SONAR AVERAGING
         # ==================================================
 
         self.sonar_sum = 0
         self.sonar_count = 0
-        self.sonar_shift = 0.1651 #meters, this is the difference between the zero point of the sonar and the sonde
-        self.winch_limit_threshold = 1.0
+        self.sonar_shift = self.get_parameter('sonar_shift').value
+        self.winch_limit_threshold = self.get_parameter('winch_limit_threshold').value
 
         # ==================================================
         # ENCODER VARIABLES
@@ -122,17 +141,17 @@ class WinchMissionNode(Node):
         self.target_length = 0
         self.cap_length = 0
 
-        self.error_threshold = 0.05
+        self.error_threshold = self.get_parameter('error_threshold').value
 
-        self.waiting_time = 3
+        self.waiting_time = self.get_parameter('waiting_time').value
 
-        self.final_winch = 12.0 # max length the winch can go, in meters
+        self.final_winch = self.get_parameter('final_winch').value
 
         self.wait_counter = 0
-        self.diameter = 0.2032 #diameter of spool in meters, which translates to 8 in (the diameter of my winch)
-        self.num_mag = 20 #number of magnets to make a full revolution around the spool
-        self.max_speed = 0.8 # normalized thrust
-        self.min_speed = 0.35
+        self.diameter = self.get_parameter('diameter').value
+        self.num_mag = self.get_parameter('num_mag').value
+        self.max_speed = self.get_parameter('max_speed').value
+        self.min_speed = self.get_parameter('min_speed').value
 
         # ==================================================
         # MOTOR STALL / ENCODER FAILURE DETECTION
@@ -140,7 +159,7 @@ class WinchMissionNode(Node):
 
         self.last_length_check = 0.0
         self.stall_counter = 0
-        self.stall_timeout_cycles = int(1.0 * self.frequency)  # 1 second
+        self.stall_timeout_cycles = self.get_parameter('stall_timeout_cycles').value
         self.commanded_speed = 0.0
         self.min_motion_threshold = (self.diameter*math.pi)/(4*self.num_mag) # Twice the distance measured by a single magnet
 
@@ -149,12 +168,12 @@ class WinchMissionNode(Node):
         # ==================================================
 
         self.last_command_time = self.get_clock().now()
-        self.watchdog_timeout = 0.5   # 500 ms ROS freeze detection
+        self.watchdog_timeout = self.get_parameter('watchdog_timeout').value
         self.motor_safe = True
 
         # Encoder anomaly detection
         self.prev_winch_length = 0
-        self.encoder_jump_threshold = 0.5
+        self.encoder_jump_threshold = self.get_parameter('encoder_jump_threshold').value
 	
 	
         # ==================================================

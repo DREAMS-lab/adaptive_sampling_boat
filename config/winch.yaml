@@ -1,0 +1,16 @@
+winch_mission_node:
+  ros__parameters:
+    sonar_shift: 0.1651
+    winch_limit_threshold: 1.0
+    final_winch: 12.0
+    diameter: 0.2032
+    num_mag: 20
+    max_speed: 0.8
+    min_speed: 0.35
+    waiting_time: 3
+    error_threshold: 0.05
+    stall_timeout_cycles: 20
+    encoder_jump_threshold: 0.5
+    battery_threshold: 0.3
+    watchdog_timeout: 0.5
+    frequency: 20

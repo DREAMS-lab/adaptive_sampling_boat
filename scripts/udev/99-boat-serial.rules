@@ -1,0 +1,28 @@
+# Stable symlinks for boat USB serial devices.
+#
+# Install:
+#   sudo cp 99-boat-serial.rules /etc/udev/rules.d/
+#   sudo udevadm control --reload
+#   sudo udevadm trigger
+#
+# After install, the three sensors appear at fixed paths regardless of plug order:
+#   /dev/boat_fc     → Pixhawk flight controller
+#   /dev/boat_sonde  → YSI EXO multiparameter sonde
+#   /dev/boat_sonar  → Blue Robotics Ping1D echosounder
+#
+# To find the serial number of a device currently at /dev/ttyUSBn:
+#   udevadm info --attribute-walk /dev/ttyUSBn | grep -E 'idVendor|idProduct|serial'
+#
+# Replace the <FILL_IN_...> placeholders below with the serials from your hardware,
+# then copy the file into /etc/udev/rules.d/ as above.
+
+# Pixhawk (FC) — vendor/product IDs are stable across units
+SUBSYSTEM=="tty", ATTRS{idVendor}=="26ac", ATTRS{idProduct}=="0011", SYMLINK+="boat_fc"
+# Fallback for 3DR telemetry radio acting as FC link
+SUBSYSTEM=="tty", ATTRS{idVendor}=="0403", ATTRS{idProduct}=="6015", ATTRS{serial}=="<FILL_IN_FC_SERIAL>", SYMLINK+="boat_fc"
+
+# YSI EXO Sonde (FTDI USB-serial)
+SUBSYSTEM=="tty", ATTRS{idVendor}=="0403", ATTRS{serial}=="<FILL_IN_SONDE_SERIAL>", SYMLINK+="boat_sonde"
+
+# Blue Robotics Ping1D sonar (FTDI USB-serial)
+SUBSYSTEM=="tty", ATTRS{idVendor}=="0403", ATTRS{serial}=="<FILL_IN_SONAR_SERIAL>", SYMLINK+="boat_sonar"

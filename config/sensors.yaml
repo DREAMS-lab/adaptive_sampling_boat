@@ -1,0 +1,17 @@
+ping1d_node:
+  ros__parameters:
+    port: /dev/boat_sonar
+    speed: 1450000
+    interval_num: 100
+    gain_num: 1
+    scan_start: 100
+    scan_lenght: 3000
+    mode_auto: 0
+
+sonde_reader:
+  ros__parameters:
+    port: /dev/boat_sonde
+    baud: 19200
+    rate_hz: 10.0
+    enable_command: "SCR -on"
+    version_command: "VER"
