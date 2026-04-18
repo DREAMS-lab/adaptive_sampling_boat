@@ -1,0 +1,17 @@
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+.pytest_cache/
+
+# virtualenvs (karin lives at ~/karin but ignore if someone puts it here)
+karin/
+venv/
+.venv/
+
+# editor state
+.vscode/
+.idea/
+
+# mission outputs (these can be large)
+laptop/post_processing/output/
