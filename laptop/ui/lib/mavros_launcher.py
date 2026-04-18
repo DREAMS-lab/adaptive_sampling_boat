@@ -46,6 +46,33 @@ def _mavros_is_running() -> bool:
     return r.returncode == 0 and bool(r.stdout.strip())
 
 
+def _who_has_port(port_dev: str) -> list[str]:
+    """Return list of 'pid command' strings for processes holding port_dev."""
+    # Extract the device path, drop the ':baud' suffix MAVROS uses
+    dev = port_dev.split(":", 1)[0]
+    if not os.path.exists(dev):
+        return []
+    r = subprocess.run(["fuser", dev], capture_output=True, text=True)
+    # fuser prints PIDs to stderr when found; stdout stays empty
+    pids_raw = (r.stderr + " " + r.stdout).split(":", 1)[-1]
+    pids = [p for p in pids_raw.split() if p.isdigit()]
+    out = []
+    for pid in pids:
+        try:
+            with open(f"/proc/{pid}/comm") as f:
+                name = f.read().strip()
+            out.append(f"{pid} ({name})")
+        except OSError:
+            out.append(pid)
+    return out
+
+
+def _kill_stale_mavros() -> None:
+    """Kill any mavros_node that we don't own (leftover from prior runs)."""
+    subprocess.run(["pkill", "-9", "-f", MAVROS_PROC_NAME], capture_output=True)
+    time.sleep(0.3)
+
+
 def _find_terminal() -> Optional[tuple[str, str]]:
     for exe, flag in TERMINAL_CANDIDATES:
         if shutil.which(exe):
@@ -68,10 +95,22 @@ class MavrosLauncher:
         fcu_url: str = DEFAULT_FCU,
         gcs_url: str = DEFAULT_GCS,
     ) -> tuple[bool, str]:
-        """Open a terminal window running `ros2 launch mavros px4.launch …`."""
+        """Open a terminal window running `ros2 launch mavros px4.launch …`.
+
+        Before launching, kills any stale mavros_node and checks that the
+        serial port isn't being held by something else (usually QGC).
+        """
         with self._lock:
-            if _mavros_is_running():
-                return False, "MAVROS already running — Stop first"
+            # Clean up any stale MAVROS from a previous run (they leak the port)
+            _kill_stale_mavros()
+
+            # Check if the port is still busy (probably QGC or a driver hang)
+            holders = _who_has_port(fcu_url)
+            if holders:
+                return False, (
+                    f"{fcu_url.split(':')[0]} is held by: {', '.join(holders)}.\n"
+                    "Close QGC's comm link (or that process), then Start again."
+                )
 
             term = _find_terminal()
             if term is None:
