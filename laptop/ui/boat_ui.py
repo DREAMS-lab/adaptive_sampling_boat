@@ -178,45 +178,77 @@ class SensorTab(QtWidgets.QWidget):
         self.arm_winch = QtWidgets.QCheckBox("ARM WINCH (required for motor)")
         self.arm_winch.setStyleSheet("QCheckBox { color: #a00; font-weight: bold; }")
 
-        mv_layout = QtWidgets.QHBoxLayout()
-        mv_up = QtWidgets.QPushButton("Raise (−30%)")
-        mv_dn = QtWidgets.QPushButton("Lower (+30%)")
-        mv_stop = QtWidgets.QPushButton("Stop")
-        mv_up.clicked.connect(lambda: self._winch_move(-0.3))
-        mv_dn.clicked.connect(lambda: self._winch_move(+0.3))
-        mv_stop.clicked.connect(lambda: self._winch_move(0.0))
-        mv_layout.addWidget(mv_up)
-        mv_layout.addWidget(mv_stop)
-        mv_layout.addWidget(mv_dn)
+        # Fine-grain speed buttons. Negative = raise, positive = lower.
+        speeds = QtWidgets.QGridLayout()
+        speeds.addWidget(QtWidgets.QLabel("<b>Raise</b>"), 0, 0)
+        for col, pct in enumerate((-0.40, -0.30, -0.20, -0.10)):
+            btn = QtWidgets.QPushButton(f"{int(abs(pct)*100)}%")
+            btn.clicked.connect(lambda _, p=pct: self._winch_move(p))
+            speeds.addWidget(btn, 0, col + 1)
+        stop_btn = QtWidgets.QPushButton("STOP")
+        stop_btn.setStyleSheet("QPushButton { font-weight: bold; }")
+        stop_btn.clicked.connect(lambda: self._winch_move(0.0))
+        speeds.addWidget(stop_btn, 1, 0, 1, 5)
+        speeds.addWidget(QtWidgets.QLabel("<b>Lower</b>"), 2, 0)
+        for col, pct in enumerate((0.10, 0.20, 0.30, 0.40)):
+            btn = QtWidgets.QPushButton(f"{int(pct*100)}%")
+            btn.clicked.connect(lambda _, p=pct: self._winch_move(p))
+            speeds.addWidget(btn, 2, col + 1)
+
+        # Closed-loop "move to depth" — uses /winch length feedback.
+        cl_row = QtWidgets.QHBoxLayout()
+        self.winch_target = QtWidgets.QDoubleSpinBox()
+        self.winch_target.setRange(0.0, 12.0)
+        self.winch_target.setSingleStep(0.1)
+        self.winch_target.setSuffix(" m")
+        self.winch_target.setValue(1.0)
+        goto_btn = QtWidgets.QPushButton("Go to depth")
+        goto_btn.clicked.connect(self._winch_goto_depth)
+        cl_row.addWidget(QtWidgets.QLabel("Target depth:"))
+        cl_row.addWidget(self.winch_target)
+        cl_row.addWidget(goto_btn)
 
         v.addWidget(self.winch_length_label)
         v.addWidget(self.winch_gpio_label)
         v.addWidget(read_btn)
         v.addWidget(self.arm_winch)
-        v.addLayout(mv_layout)
+        v.addLayout(speeds)
+        v.addLayout(cl_row)
         v.addStretch(1)
+
+        # State for the closed-loop controller
+        self._winch_goal: Optional[float] = None
+        self._winch_poll = QtCore.QTimer(self)
+        self._winch_poll.timeout.connect(self._winch_goto_tick)
         return box
 
     # --- actions --- #
 
     def _start_sonar(self) -> None:
-        ok, msg = odroid_ssh.start_sensor(odroid_ssh.SONAR)
-        self.sonar_status.setText(msg)
+        self.sonar_status.setText("starting…")
+        self._run_async(lambda: odroid_ssh.start_sensor(odroid_ssh.SONAR),
+                        lambda r: self.sonar_status.setText(r[1]))
 
     def _stop_sonar(self) -> None:
-        ok, msg = odroid_ssh.stop_sensor(odroid_ssh.SONAR)
-        self.sonar_status.setText(msg)
+        self.sonar_status.setText("stopping…")
+        self._run_async(lambda: odroid_ssh.stop_sensor(odroid_ssh.SONAR),
+                        lambda r: self.sonar_status.setText(r[1]))
 
     def _start_sonde(self) -> None:
-        ok, msg = odroid_ssh.start_sensor(odroid_ssh.SONDE)
-        self.sonde_status.setText(msg)
+        self.sonde_status.setText("starting…")
+        self._run_async(lambda: odroid_ssh.start_sensor(odroid_ssh.SONDE),
+                        lambda r: self.sonde_status.setText(r[1]))
 
     def _stop_sonde(self) -> None:
-        ok, msg = odroid_ssh.stop_sensor(odroid_ssh.SONDE)
-        self.sonde_status.setText(msg)
+        self.sonde_status.setText("stopping…")
+        self._run_async(lambda: odroid_ssh.stop_sensor(odroid_ssh.SONDE),
+                        lambda r: self.sonde_status.setText(r[1]))
 
     def _read_winch_gpio(self) -> None:
-        result = odroid_ssh.read_winch_gpio()
+        self.winch_gpio_label.setText("GPIO: reading…")
+        self._run_async(odroid_ssh.read_winch_gpio, self._on_gpio)
+
+    def _on_gpio(self, result: dict) -> None:
         if "error" in result:
             self.winch_gpio_label.setText(f"GPIO error: {result['error']}")
             return
@@ -224,14 +256,72 @@ class SensorTab(QtWidgets.QWidget):
         self.winch_gpio_label.setText("GPIO: " + "  ".join(parts))
 
     def _winch_move(self, speed: float) -> None:
-        if not self.arm_winch.isChecked() and speed != 0.0:
-            QtWidgets.QMessageBox.warning(
-                self, "Winch locked",
-                "Check 'ARM WINCH' before moving the motor."
-            )
+        # STOP button always works; any non-zero speed needs ARM WINCH checked
+        if speed != 0.0 and not self.arm_winch.isChecked():
+            QtWidgets.QMessageBox.warning(self, "Winch locked",
+                "Check 'ARM WINCH' before moving the motor.")
             return
+        if speed == 0.0:
+            # Stop also aborts any closed-loop move in progress
+            self._winch_goal = None
+            self._winch_poll.stop()
         ok, msg = self._bridge.winch_pwm(speed)
-        self.winch_gpio_label.setText(f"winch cmd: speed={speed:+.2f} {msg}")
+        self.winch_gpio_label.setText(f"winch cmd: {speed:+.2f} {msg}")
+
+    def _winch_goto_depth(self) -> None:
+        if not self.arm_winch.isChecked():
+            QtWidgets.QMessageBox.warning(self, "Winch locked",
+                "Check 'ARM WINCH' before moving the motor.")
+            return
+        self._winch_goal = float(self.winch_target.value())
+        self._winch_poll.start(100)   # 10 Hz closed-loop
+        self.winch_gpio_label.setText(f"goto: {self._winch_goal:.2f} m")
+
+    def _winch_goto_tick(self) -> None:
+        """10 Hz closed-loop: read /winch, drive motor toward goal."""
+        if self._winch_goal is None:
+            self._winch_poll.stop()
+            return
+        length = self._bridge.latest().winch_m
+        error = self._winch_goal - length  # positive = lower more
+        tol = 0.05   # 5 cm
+        if abs(error) < tol:
+            self._bridge.winch_pwm(0.0)
+            self.winch_gpio_label.setText(
+                f"arrived: {length:.2f} m (target {self._winch_goal:.2f})")
+            self._winch_goal = None
+            self._winch_poll.stop()
+            return
+        # Proportional speed (saturated)
+        speed = max(min(error * 0.8, 0.40), -0.40)
+        if abs(speed) < 0.15:           # motor dead-zone
+            speed = 0.15 if speed > 0 else -0.15
+        self._bridge.winch_pwm(speed)
+        self.winch_gpio_label.setText(
+            f"goto: now {length:.2f} → {self._winch_goal:.2f} m "
+            f"(speed {speed:+.2f})")
+
+    # --- small async helper ---
+
+    def _run_async(self, fn, on_done) -> None:
+        """Run fn() on a thread; call on_done(result) on the Qt thread."""
+        import threading
+        def worker():
+            try:
+                result = fn()
+            except Exception as e:
+                result = (False, f"error: {e}")
+            QtCore.QMetaObject.invokeMethod(
+                self, "_deliver",
+                QtCore.Qt.QueuedConnection,
+                QtCore.Q_ARG(object, (on_done, result)),
+            )
+        threading.Thread(target=worker, daemon=True).start()
+
+    @QtCore.pyqtSlot(object)
+    def _deliver(self, payload):
+        cb, result = payload
+        cb(result)
 
     # --- polling --- #
 
