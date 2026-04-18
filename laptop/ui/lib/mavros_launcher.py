@@ -97,20 +97,26 @@ class MavrosLauncher:
     ) -> tuple[bool, str]:
         """Open a terminal window running `ros2 launch mavros px4.launch …`.
 
-        Before launching, kills any stale mavros_node and checks that the
-        serial port isn't being held by something else (usually QGC).
+        Before launching, kills any stale mavros_node AND anything else holding
+        the serial port (typically QGC). Aggressive — user asked for it.
         """
+        killed_msg = ""
         with self._lock:
-            # Clean up any stale MAVROS from a previous run (they leak the port)
+            # Clean up any stale MAVROS from a previous run
             _kill_stale_mavros()
 
-            # Check if the port is still busy (probably QGC or a driver hang)
+            # Kill anything still holding the serial port (usually QGC)
             holders = _who_has_port(fcu_url)
             if holders:
-                return False, (
-                    f"{fcu_url.split(':')[0]} is held by: {', '.join(holders)}.\n"
-                    "Close QGC's comm link (or that process), then Start again."
-                )
+                dev = fcu_url.split(":", 1)[0]
+                subprocess.run(["fuser", "-k", dev], capture_output=True)
+                time.sleep(0.5)
+                still_held = _who_has_port(fcu_url)
+                if still_held:
+                    return False, (
+                        f"{dev} is still held by {', '.join(still_held)} after kill attempt"
+                    )
+                killed_msg = f"(killed {', '.join(holders)} to free {dev}) "
 
             term = _find_terminal()
             if term is None:
@@ -145,7 +151,7 @@ class MavrosLauncher:
         for _ in range(25):
             time.sleep(0.2)
             if _mavros_is_running():
-                return True, f"MAVROS running (check the terminal window)"
+                return True, f"MAVROS running {killed_msg}(check the terminal window)"
         return False, "MAVROS didn't start within 5s — check the terminal for errors"
 
     def stop(self, timeout: float = 5.0) -> tuple[bool, str]:
