@@ -165,12 +165,16 @@ class RosBridge:
         res = fut.result()
         return bool(res.success), f"result={res.result}"
 
-    # Winch defaults (tweak if your PX4 maps AUX1 to a different servo number,
-    # or if the motor driver is polarity-flipped).
-    WINCH_SERVO = 9        # AUX1 on most Pixhawk FMUv5 builds
+    # Winch defaults (tweak from the UI or here). PX4 maps AUX1 to different
+    # servo numbers depending on board/frame. Common choices:
+    #   1 = MAIN1,  5 = MAIN5,  9 = AUX1 (FMUv5+),  94 = ArduPilot rover AUX1
+    WINCH_SERVO = 9
     WINCH_PWM_NEUTRAL = 1500
-    WINCH_PWM_RANGE = 400  # ±400 µs → 1100..1900 at max speed
-    WINCH_FLIP = True      # True = positive value lowers, negative raises
+    WINCH_PWM_RANGE = 400
+    WINCH_FLIP = True
+
+    def set_winch_servo(self, servo: int) -> None:
+        self.WINCH_SERVO = int(servo)
 
     def winch_pwm(self, value: float, timeout: float = 2.0) -> Tuple[bool, str]:
         """Send AUX1 PWM via MAV_CMD_DO_SET_SERVO (187).
@@ -205,11 +209,37 @@ class RosBridge:
 
     def publish_velocity(self, vx: float, vy: float, wz: float) -> None:
         """Publish one velocity setpoint (m/s, rad/s). Used by WASD teleop."""
-        msg = Twist()
-        msg.linear.x = float(vx)
-        msg.linear.y = float(vy)
-        msg.angular.z = float(wz)
-        self._vel_pub.publish(msg)
+        if not rclpy.ok():
+            return
+        try:
+            msg = Twist()
+            msg.linear.x = float(vx)
+            msg.linear.y = float(vy)
+            msg.angular.z = float(wz)
+            self._vel_pub.publish(msg)
+        except Exception as e:
+            log.debug("publish_velocity dropped: %s", e)
+
+    def raw_servo(self, servo: int, pwm: int, timeout: float = 2.0) -> Tuple[bool, str]:
+        """Diagnostic: MAV_CMD_DO_SET_SERVO with arbitrary servo# and PWM."""
+        if not self._cmd.wait_for_service(timeout_sec=timeout):
+            return False, "cmd service unavailable"
+        req = CommandLong.Request()
+        req.broadcast = False
+        req.command = 187
+        req.confirmation = 0
+        req.param1 = float(servo)
+        req.param2 = float(pwm)
+        req.param3 = 0.0
+        req.param4 = 0.0
+        req.param5 = 0.0
+        req.param6 = 0.0
+        req.param7 = 0.0
+        fut = self._cmd.call_async(req)
+        if not self._wait(fut, timeout):
+            return False, "cmd timeout"
+        res = fut.result()
+        return bool(res.success), f"servo={servo} pwm={pwm} result={res.result}"
 
     def push_waypoints(
         self,

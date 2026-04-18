@@ -175,6 +175,20 @@ class SensorTab(QtWidgets.QWidget):
         read_btn = QtWidgets.QPushButton("Read GPIO (SSH)")
         read_btn.clicked.connect(self._read_winch_gpio)
 
+        # Servo number picker — try different ones if motor doesn't move
+        servo_row = QtWidgets.QHBoxLayout()
+        self.winch_servo = QtWidgets.QSpinBox()
+        self.winch_servo.setRange(1, 16)
+        self.winch_servo.setValue(self._bridge.WINCH_SERVO)
+        self.winch_servo.valueChanged.connect(self._bridge.set_winch_servo)
+        servo_row.addWidget(QtWidgets.QLabel("Winch servo #:"))
+        servo_row.addWidget(self.winch_servo)
+        servo_row.addWidget(QtWidgets.QLabel(
+            "(try 1/5/9 — AUX1 depends on Pixhawk + frame)"
+        ))
+        servo_row.addStretch(1)
+        v.addLayout(servo_row)
+
         self.arm_winch = QtWidgets.QCheckBox("ARM WINCH (required for motor)")
         self.arm_winch.setStyleSheet("QCheckBox { color: #a00; font-weight: bold; }")
 
@@ -425,8 +439,8 @@ class VehicleTab(QtWidgets.QWidget):
         grid.addWidget(self.battery, row, 1, 1, 3)
         row += 1
 
-        # Motor test
-        mt_box = QtWidgets.QGroupBox("Motor test (no arm required)")
+        # Motor test (MAV_CMD_DO_MOTOR_TEST) — often unsupported on boat frames
+        mt_box = QtWidgets.QGroupBox("Motor test (no arm required — may return UNSUPPORTED on boats)")
         mt_grid = QtWidgets.QGridLayout(mt_box)
         self.mt_motor = QtWidgets.QSpinBox(); self.mt_motor.setRange(1, 8); self.mt_motor.setValue(1)
         self.mt_throttle = QtWidgets.QSpinBox(); self.mt_throttle.setRange(0, 80); self.mt_throttle.setValue(20)
@@ -438,6 +452,26 @@ class VehicleTab(QtWidgets.QWidget):
         mt_grid.addWidget(QtWidgets.QLabel("Duration (s)"), 0, 4); mt_grid.addWidget(self.mt_duration, 0, 5)
         mt_grid.addWidget(mt_btn, 0, 6)
         grid.addWidget(mt_box, row, 0, 1, 4)
+        row += 1
+
+        # Raw servo test — useful to find which servo number drives the winch
+        rs_box = QtWidgets.QGroupBox("Raw servo test (MAV_CMD_DO_SET_SERVO)")
+        rs_grid = QtWidgets.QGridLayout(rs_box)
+        self.rs_servo = QtWidgets.QSpinBox(); self.rs_servo.setRange(1, 16); self.rs_servo.setValue(9)
+        self.rs_pwm = QtWidgets.QSpinBox(); self.rs_pwm.setRange(1000, 2000); self.rs_pwm.setSingleStep(50); self.rs_pwm.setValue(1600)
+        rs_btn = QtWidgets.QPushButton("Send once")
+        rs_center_btn = QtWidgets.QPushButton("Center (1500)")
+        rs_btn.clicked.connect(self._do_raw_servo)
+        rs_center_btn.clicked.connect(self._do_raw_servo_center)
+        rs_grid.addWidget(QtWidgets.QLabel("Servo #"), 0, 0); rs_grid.addWidget(self.rs_servo, 0, 1)
+        rs_grid.addWidget(QtWidgets.QLabel("PWM µs"), 0, 2); rs_grid.addWidget(self.rs_pwm, 0, 3)
+        rs_grid.addWidget(rs_btn, 0, 4); rs_grid.addWidget(rs_center_btn, 0, 5)
+        rs_grid.addWidget(QtWidgets.QLabel(
+            "Send PWM to one servo to find the right channel.\n"
+            "1500 = neutral/stop, 1100–1400 = reverse, 1600–1900 = forward.\n"
+            "Try servos 1, 5, 9 — whichever makes the winch or a thruster move is the right number."),
+            1, 0, 1, 6)
+        grid.addWidget(rs_box, row, 0, 1, 4)
         row += 1
 
         grid.setRowStretch(row, 1)
@@ -481,6 +515,14 @@ class VehicleTab(QtWidgets.QWidget):
             self._info(f"motor test sent: {msg}")
         else:
             QtWidgets.QMessageBox.warning(self, "Motor test", f"failed: {msg}")
+
+    def _do_raw_servo(self) -> None:
+        ok, msg = self._bridge.raw_servo(self.rs_servo.value(), self.rs_pwm.value())
+        self._info(f"raw servo: {msg}")
+
+    def _do_raw_servo_center(self) -> None:
+        ok, msg = self._bridge.raw_servo(self.rs_servo.value(), 1500)
+        self._info(f"raw servo center: {msg}")
 
     def _info(self, msg: str) -> None:
         win = self.window()
