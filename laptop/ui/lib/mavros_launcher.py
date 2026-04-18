@@ -1,12 +1,16 @@
-"""Launch and manage a MAVROS subprocess owned by the UI.
+"""Launch MAVROS in a terminal window so logs are visible and Ctrl-C works.
 
-MAVROS is `ros2 launch mavros px4.launch ...` — it stays alive as long as the
-process runs. We spawn it via subprocess.Popen, capture stdout+stderr to a
-log file, and kill the whole process group on stop.
+We spawn a terminal (konsole / gnome-terminal / xterm / xfce4-terminal,
+whichever is on PATH) that runs `ros2 launch mavros px4.launch ...` directly.
+The user sees live output, and Ctrl-C in that window shuts MAVROS down the
+same way it would from any other terminal.
 
-Killing with os.killpg is important because `ros2 launch` spawns children
-(mavros_node, parameter loaders) that would linger if we only killed the
-parent PID.
+The UI's Start/Stop buttons are convenience wrappers:
+  Start → opens the terminal (or refuses if MAVROS is already running)
+  Stop  → SIGINTs the mavros_node process and the terminal
+
+PID tracking uses pgrep/pkill on the process name since the terminal itself
+is the subprocess parent we own, not MAVROS directly.
 """
 
 from __future__ import annotations
@@ -25,129 +29,105 @@ log = logging.getLogger(__name__)
 
 DEFAULT_FCU = "/dev/ttyUSB0:57600"
 DEFAULT_GCS = "udp://@localhost:14550"
+MAVROS_PROC_NAME = "mavros_node"
 
-LOG_PATH = Path("/tmp/karin_mavros.log")
-
-# Try these in order; first one on PATH wins.
+# Terminal emulators to try, in priority order, with the flag for "run command".
 TERMINAL_CANDIDATES = [
-    ("konsole", ["-e", "bash", "-c"]),
-    ("gnome-terminal", ["--", "bash", "-c"]),
-    ("xfce4-terminal", ["-e", "bash -c"]),
-    ("xterm", ["-e", "bash", "-c"]),
+    ("konsole", "-e"),
+    ("gnome-terminal", "--"),
+    ("xfce4-terminal", "-e"),
+    ("xterm", "-e"),
 ]
 
 
-def _open_log_terminal() -> Optional[subprocess.Popen]:
-    """Open a terminal window tailing LOG_PATH. Returns the Popen or None."""
-    for exe, args in TERMINAL_CANDIDATES:
+def _mavros_is_running() -> bool:
+    r = subprocess.run(["pgrep", "-f", MAVROS_PROC_NAME],
+                       capture_output=True, text=True)
+    return r.returncode == 0 and bool(r.stdout.strip())
+
+
+def _find_terminal() -> Optional[tuple[str, str]]:
+    for exe, flag in TERMINAL_CANDIDATES:
         if shutil.which(exe):
-            cmd = [exe] + args + [f"echo '=== MAVROS log ({LOG_PATH}) ==='; tail -F {LOG_PATH}"]
-            log.info("opening log terminal: %s", exe)
-            try:
-                return subprocess.Popen(cmd, preexec_fn=os.setsid)
-            except Exception as e:
-                log.warning("terminal %s spawn failed: %s", exe, e)
-    log.warning("no terminal emulator found on PATH")
+            return exe, flag
     return None
 
 
 class MavrosLauncher:
-    """Owns the MAVROS child process. Safe to call start()/stop() repeatedly."""
+    """Owns the terminal window that runs MAVROS."""
 
     def __init__(self) -> None:
-        self._proc: Optional[subprocess.Popen] = None
-        self._term_proc: Optional[subprocess.Popen] = None
+        self._term: Optional[subprocess.Popen] = None
         self._lock = threading.Lock()
 
-    # ------------------------------- api ------------------------------- #
-
     def is_running(self) -> bool:
-        with self._lock:
-            return self._proc is not None and self._proc.poll() is None
+        return _mavros_is_running()
 
     def start(
         self,
         fcu_url: str = DEFAULT_FCU,
         gcs_url: str = DEFAULT_GCS,
     ) -> tuple[bool, str]:
-        """Start `ros2 launch mavros px4.launch ...`. Idempotent (stops first)."""
+        """Open a terminal window running `ros2 launch mavros px4.launch …`."""
         with self._lock:
-            if self._proc is not None and self._proc.poll() is None:
-                return False, "already running"
+            if _mavros_is_running():
+                return False, "MAVROS already running — Stop first"
 
-            cmd = [
-                "ros2", "launch", "mavros", "px4.launch",
-                f"fcu_url:={fcu_url}",
-                f"gcs_url:={gcs_url}",
-            ]
-            log.info("starting MAVROS: %s", " ".join(cmd))
+            term = _find_terminal()
+            if term is None:
+                return False, "no terminal emulator found (install konsole or xterm)"
+            exe, flag = term
+
+            # The inner bash script: run MAVROS and keep the terminal open
+            # after it exits so the user can read the final log.
+            inner = (
+                f"echo '=== MAVROS launch ===' && "
+                f"echo 'fcu_url={fcu_url}' && "
+                f"echo 'gcs_url={gcs_url}' && "
+                f"echo '--- Ctrl-C in this window stops MAVROS ---' && echo && "
+                f"ros2 launch mavros px4.launch "
+                f"fcu_url:={fcu_url} gcs_url:={gcs_url}; "
+                f"echo; echo '[MAVROS exited. This window will close in 3s]'; sleep 3"
+            )
+
+            # konsole + gnome-terminal need "bash -c" expressed slightly differently.
+            if exe == "gnome-terminal":
+                cmd = [exe, "--", "bash", "-c", inner]
+            else:
+                cmd = [exe, flag, "bash", "-c", inner]
+
+            log.info("spawning MAVROS terminal: %s", " ".join(cmd[:3]))
             try:
-                logf = LOG_PATH.open("w")
-                self._proc = subprocess.Popen(
-                    cmd,
-                    stdout=logf,
-                    stderr=subprocess.STDOUT,
-                    preexec_fn=os.setsid,       # new process group so we can killpg
-                )
-            except FileNotFoundError:
-                return False, "ros2 not on PATH — is /opt/ros/humble sourced?"
+                self._term = subprocess.Popen(cmd, preexec_fn=os.setsid)
             except Exception as e:
-                return False, f"spawn failed: {e}"
+                return False, f"terminal spawn failed: {e}"
 
-            # Spin up a terminal window tailing the log so the user can see output.
-            self._term_proc = _open_log_terminal()
-
-        # Give it a moment to blow up if wrong args
-        time.sleep(1.0)
-        if not self.is_running():
-            return False, f"MAVROS exited immediately — check {LOG_PATH}"
-        msg = f"MAVROS running (pid {self._proc.pid})"
-        if self._term_proc is None:
-            msg += f"; no terminal found, log at {LOG_PATH}"
-        return True, msg
+        # Wait up to 5s for mavros_node to appear
+        for _ in range(25):
+            time.sleep(0.2)
+            if _mavros_is_running():
+                return True, f"MAVROS running (check the terminal window)"
+        return False, "MAVROS didn't start within 5s — check the terminal for errors"
 
     def stop(self, timeout: float = 5.0) -> tuple[bool, str]:
-        """Kill the launch process group (SIGINT first, SIGKILL if hung)."""
+        """SIGINT mavros_node and close the terminal window."""
+        # Polite interrupt first — ros2 launch catches this and tears down cleanly.
+        if _mavros_is_running():
+            subprocess.run(["pkill", "-INT", "-f", MAVROS_PROC_NAME],
+                           capture_output=True)
+            t0 = time.monotonic()
+            while _mavros_is_running() and time.monotonic() - t0 < timeout:
+                time.sleep(0.2)
+            if _mavros_is_running():
+                subprocess.run(["pkill", "-KILL", "-f", MAVROS_PROC_NAME],
+                               capture_output=True)
+        # Close the terminal window too
         with self._lock:
-            proc = self._proc
-            term = self._term_proc
-            self._proc = None
-            self._term_proc = None
-
-        # Close log terminal too
+            term = self._term
+            self._term = None
         if term is not None and term.poll() is None:
             try:
                 os.killpg(os.getpgid(term.pid), signal.SIGTERM)
             except Exception:
                 pass
-
-        if proc is None or proc.poll() is not None:
-            return True, "was not running"
-
-        pgid = os.getpgid(proc.pid)
-
-        # Polite SIGINT (ros2 launch catches this and shuts down children).
-        os.killpg(pgid, signal.SIGINT)
-        try:
-            proc.wait(timeout=timeout)
-            return True, "stopped cleanly"
-        except subprocess.TimeoutExpired:
-            pass
-
-        # Hung — escalate.
-        os.killpg(pgid, signal.SIGKILL)
-        try:
-            proc.wait(timeout=2.0)
-            return True, "force-killed"
-        except subprocess.TimeoutExpired:
-            return False, "process still running after SIGKILL (manual cleanup needed)"
-
-    def log_tail(self, lines: int = 20) -> str:
-        if not LOG_PATH.exists():
-            return "(no log yet)"
-        try:
-            with LOG_PATH.open() as f:
-                content = f.readlines()
-            return "".join(content[-lines:])
-        except Exception as e:
-            return f"(log read error: {e})"
+        return True, "stopped"
