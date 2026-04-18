@@ -18,6 +18,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from lib import odroid_ssh
 from lib.lawnmower import generate as lawnmower_generate
+from lib.mavros_launcher import DEFAULT_FCU, DEFAULT_GCS, MavrosLauncher
 from lib.mission_upload import preview_text
 from lib.ros_bridge import RosBridge
 from lib.setpoint_streamer import SetpointStreamer
@@ -248,12 +249,39 @@ class SensorTab(QtWidgets.QWidget):
 # =========================================================================== #
 
 class VehicleTab(QtWidgets.QWidget):
-    def __init__(self, bridge: RosBridge):
+    def __init__(self, bridge: RosBridge, mavros: MavrosLauncher):
         super().__init__()
         self._bridge = bridge
+        self._mavros = mavros
 
         grid = QtWidgets.QGridLayout(self)
         row = 0
+
+        # MAVROS launcher panel
+        mav_box = QtWidgets.QGroupBox("MAVROS (launches ros2 launch mavros px4.launch)")
+        mg = QtWidgets.QGridLayout(mav_box)
+        self.fcu_url = QtWidgets.QLineEdit(DEFAULT_FCU)
+        self.gcs_url = QtWidgets.QLineEdit(DEFAULT_GCS)
+        start_mav = QtWidgets.QPushButton("Start MAVROS")
+        stop_mav = QtWidgets.QPushButton("Stop MAVROS")
+        start_mav.clicked.connect(self._start_mavros)
+        stop_mav.clicked.connect(self._stop_mavros)
+        self.mavros_dot = StatusDot()
+        self.mavros_text = QtWidgets.QLabel("not launched")
+        mg.addWidget(QtWidgets.QLabel("fcu_url:"), 0, 0)
+        mg.addWidget(self.fcu_url, 0, 1, 1, 3)
+        mg.addWidget(QtWidgets.QLabel("gcs_url:"), 1, 0)
+        mg.addWidget(self.gcs_url, 1, 1, 1, 3)
+        mg.addWidget(start_mav, 2, 0)
+        mg.addWidget(stop_mav, 2, 1)
+        mg.addWidget(self.mavros_dot, 2, 2)
+        mg.addWidget(self.mavros_text, 2, 3)
+        mg.addWidget(QtWidgets.QLabel(
+            "Tip: with gcs_url set, QGC auto-connects on UDP 14550 (localhost). "
+            "Close QGC first if it's holding the serial port."
+        ), 3, 0, 1, 4)
+        grid.addWidget(mav_box, row, 0, 1, 4)
+        row += 1
 
         # Link
         self.link_dot = StatusDot()
@@ -324,6 +352,14 @@ class VehicleTab(QtWidgets.QWidget):
 
     # --- actions --- #
 
+    def _start_mavros(self) -> None:
+        ok, msg = self._mavros.start(self.fcu_url.text().strip(), self.gcs_url.text().strip())
+        QtWidgets.QMessageBox.information(self, "MAVROS", msg)
+
+    def _stop_mavros(self) -> None:
+        ok, msg = self._mavros.stop()
+        QtWidgets.QMessageBox.information(self, "MAVROS", msg)
+
     def _do_set_mode(self) -> None:
         mode = self.mode_combo.currentText()
         ok, msg = self._bridge.set_mode(mode)
@@ -374,6 +410,10 @@ class VehicleTab(QtWidgets.QWidget):
         self.gps.setText(f"{s.gps_lat:.6f}, {s.gps_lon:.6f}"
                          if s.gps_lat or s.gps_lon else "no fix")
         self.battery.setText(f"{s.battery_pct:.0f}%" if s.battery_pct >= 0 else "—")
+
+        running = self._mavros.is_running()
+        self.mavros_dot.set_ok(running)
+        self.mavros_text.setText("running" if running else "not launched")
 
 
 # =========================================================================== #
@@ -565,10 +605,11 @@ class BoatUI(QtWidgets.QMainWindow):
 
         self._bridge = RosBridge()
         self._bridge.start()
+        self._mavros = MavrosLauncher()
 
         tabs = QtWidgets.QTabWidget()
         self.sensor_tab = SensorTab(self._bridge)
-        self.vehicle_tab = VehicleTab(self._bridge)
+        self.vehicle_tab = VehicleTab(self._bridge, self._mavros)
         self.mission_tab = MissionTab(self._bridge)
         tabs.addTab(self.vehicle_tab, "Vehicle")
         tabs.addTab(self.sensor_tab, "Sensors")
@@ -598,6 +639,8 @@ class BoatUI(QtWidgets.QMainWindow):
         try:
             if self.mission_tab._streamer:
                 self.mission_tab._streamer.stop()
+            if self._mavros.is_running():
+                self._mavros.stop()
         finally:
             self._bridge.shutdown()
         super().closeEvent(ev)

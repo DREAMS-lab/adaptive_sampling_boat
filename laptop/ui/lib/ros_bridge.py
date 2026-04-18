@@ -18,6 +18,7 @@ from mavros_msgs.msg import State, Waypoint
 from mavros_msgs.srv import CommandBool, CommandLong, SetMode, WaypointPush
 from rclpy.executors import MultiThreadedExecutor
 from rclpy.node import Node
+from rclpy.qos import qos_profile_sensor_data
 from sensor_msgs.msg import BatteryState, NavSatFix
 from std_msgs.msg import Float32, String
 
@@ -55,15 +56,16 @@ class RosBridge:
         self._latest = LatestState()
 
         # --- subscriptions ---
+        # State uses default QoS; position/battery/gps use SENSOR_DATA (BEST_EFFORT).
         self._node.create_subscription(State, "/mavros/state", self._on_state, 10)
         self._node.create_subscription(
-            PoseStamped, "/mavros/local_position/pose", self._on_pose, 10
+            PoseStamped, "/mavros/local_position/pose", self._on_pose, qos_profile_sensor_data
         )
         self._node.create_subscription(
-            BatteryState, "/mavros/battery", self._on_battery, 10
+            BatteryState, "/mavros/battery", self._on_battery, qos_profile_sensor_data
         )
         self._node.create_subscription(
-            NavSatFix, "/mavros/global_position/global", self._on_gps, 10
+            NavSatFix, "/mavros/global_position/global", self._on_gps, qos_profile_sensor_data
         )
         self._node.create_subscription(Float32, "/ping1d/data", self._on_ping, 10)
         self._node.create_subscription(String, "/sonde_data", self._on_sonde, 10)

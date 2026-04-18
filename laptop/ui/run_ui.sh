@@ -4,7 +4,7 @@
 # Activates the ~/karin venv, sources ROS2 Humble, and runs boat_ui.py.
 # If you haven't created the venv yet, run ./setup_karin.sh first.
 
-set -euo pipefail
+set -eo pipefail   # no -u: ROS2 setup.bash touches unset vars
 
 VENV_DIR="${HOME}/karin"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
