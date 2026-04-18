@@ -179,19 +179,22 @@ class SensorTab(QtWidgets.QWidget):
         self.arm_winch.setStyleSheet("QCheckBox { color: #a00; font-weight: bold; }")
 
         # Fine-grain speed buttons. Negative = raise, positive = lower.
+        # Arrow on each button so ↑ = up / raise, ↓ = down / lower.
         speeds = QtWidgets.QGridLayout()
-        speeds.addWidget(QtWidgets.QLabel("<b>Raise</b>"), 0, 0)
-        for col, pct in enumerate((-0.40, -0.30, -0.20, -0.10)):
-            btn = QtWidgets.QPushButton(f"{int(abs(pct)*100)}%")
+        speeds.addWidget(QtWidgets.QLabel("<b>↑ Raise</b>"), 0, 0)
+        for col, pct in enumerate((-0.40, -0.30, -0.20, -0.10, -0.05)):
+            btn = QtWidgets.QPushButton(f"↑ {int(abs(pct)*100)}%")
             btn.clicked.connect(lambda _, p=pct: self._winch_move(p))
             speeds.addWidget(btn, 0, col + 1)
-        stop_btn = QtWidgets.QPushButton("STOP")
-        stop_btn.setStyleSheet("QPushButton { font-weight: bold; }")
+        stop_btn = QtWidgets.QPushButton("■ STOP")
+        stop_btn.setStyleSheet(
+            "QPushButton { font-weight: bold; background: #c03030; color: white; padding: 6px; }"
+        )
         stop_btn.clicked.connect(lambda: self._winch_move(0.0))
-        speeds.addWidget(stop_btn, 1, 0, 1, 5)
-        speeds.addWidget(QtWidgets.QLabel("<b>Lower</b>"), 2, 0)
-        for col, pct in enumerate((0.10, 0.20, 0.30, 0.40)):
-            btn = QtWidgets.QPushButton(f"{int(pct*100)}%")
+        speeds.addWidget(stop_btn, 1, 0, 1, 6)
+        speeds.addWidget(QtWidgets.QLabel("<b>↓ Lower</b>"), 2, 0)
+        for col, pct in enumerate((0.05, 0.10, 0.20, 0.30, 0.40)):
+            btn = QtWidgets.QPushButton(f"↓ {int(pct*100)}%")
             btn.clicked.connect(lambda _, p=pct: self._winch_move(p))
             speeds.addWidget(btn, 2, col + 1)
 
