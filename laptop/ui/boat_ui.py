@@ -765,6 +765,114 @@ class MissionTab(QtWidgets.QWidget):
 #                                MAIN WINDOW                                   #
 # =========================================================================== #
 
+class TeleopTab(QtWidgets.QWidget):
+    """WASD teleop: streams velocity setpoints at 20 Hz while keys are held.
+
+    W/S  → forward / backward   (linear x)
+    A/D  → yaw left / yaw right (angular z)
+    Q/E  → strafe left / right  (linear y — boats usually ignore this)
+    SPACE → immediate stop
+    """
+
+    RATE_HZ = 20.0
+
+    def __init__(self, bridge: RosBridge):
+        super().__init__()
+        self._bridge = bridge
+        self._keys: set[int] = set()
+        self._enabled = False
+
+        layout = QtWidgets.QVBoxLayout(self)
+
+        layout.addWidget(QtWidgets.QLabel(
+            "<b>Keyboard teleop (requires OFFBOARD + armed)</b><br>"
+            "Publishes /mavros/setpoint_velocity/cmd_vel_unstamped at 20 Hz.<br>"
+            "<b>W/S</b> forward/back &nbsp;&nbsp; <b>A/D</b> yaw &nbsp;&nbsp; "
+            "<b>Q/E</b> strafe &nbsp;&nbsp; <b>SPACE</b> stop &nbsp;&nbsp; "
+            "Click the window, then hold keys."
+        ))
+
+        speed_row = QtWidgets.QHBoxLayout()
+        self.linear_speed = QtWidgets.QDoubleSpinBox()
+        self.linear_speed.setRange(0.0, 2.0); self.linear_speed.setSingleStep(0.1); self.linear_speed.setValue(0.5); self.linear_speed.setSuffix(" m/s")
+        self.angular_speed = QtWidgets.QDoubleSpinBox()
+        self.angular_speed.setRange(0.0, 3.0); self.angular_speed.setSingleStep(0.1); self.angular_speed.setValue(0.8); self.angular_speed.setSuffix(" rad/s")
+        speed_row.addWidget(QtWidgets.QLabel("Linear speed:"))
+        speed_row.addWidget(self.linear_speed)
+        speed_row.addSpacing(20)
+        speed_row.addWidget(QtWidgets.QLabel("Angular speed:"))
+        speed_row.addWidget(self.angular_speed)
+        speed_row.addStretch(1)
+        layout.addLayout(speed_row)
+
+        btn_row = QtWidgets.QHBoxLayout()
+        self.enable_btn = QtWidgets.QPushButton("Enable teleop")
+        self.enable_btn.setCheckable(True)
+        self.enable_btn.toggled.connect(self._on_enable_toggled)
+        btn_row.addWidget(self.enable_btn)
+        self.enabled_dot = StatusDot()
+        btn_row.addWidget(self.enabled_dot)
+        self.enabled_text = QtWidgets.QLabel("disabled")
+        btn_row.addWidget(self.enabled_text)
+        btn_row.addStretch(1)
+        layout.addLayout(btn_row)
+
+        self.status = QtWidgets.QLabel("vx=0.0  vy=0.0  wz=0.0")
+        f = self.status.font(); f.setPointSize(16); f.setBold(True); self.status.setFont(f)
+        layout.addWidget(self.status)
+
+        layout.addStretch(1)
+
+        self.setFocusPolicy(QtCore.Qt.StrongFocus)
+
+        self._timer = QtCore.QTimer(self)
+        self._timer.timeout.connect(self._tick)
+
+    def _on_enable_toggled(self, on: bool) -> None:
+        self._enabled = on
+        if on:
+            self.enable_btn.setText("Disable teleop")
+            self._timer.start(int(1000 / self.RATE_HZ))
+            self.setFocus()
+        else:
+            self.enable_btn.setText("Enable teleop")
+            self._timer.stop()
+            self._bridge.publish_velocity(0.0, 0.0, 0.0)
+            self._keys.clear()
+        self.enabled_dot.set_ok(on)
+        self.enabled_text.setText("ENABLED (streaming)" if on else "disabled")
+
+    def _tick(self) -> None:
+        if not self._enabled:
+            return
+        vlin = float(self.linear_speed.value())
+        vang = float(self.angular_speed.value())
+        vx = vy = wz = 0.0
+        if QtCore.Qt.Key_W in self._keys: vx += vlin
+        if QtCore.Qt.Key_S in self._keys: vx -= vlin
+        if QtCore.Qt.Key_Q in self._keys: vy += vlin
+        if QtCore.Qt.Key_E in self._keys: vy -= vlin
+        if QtCore.Qt.Key_A in self._keys: wz += vang
+        if QtCore.Qt.Key_D in self._keys: wz -= vang
+        self._bridge.publish_velocity(vx, vy, wz)
+        self.status.setText(f"vx={vx:+.2f}  vy={vy:+.2f}  wz={wz:+.2f}")
+
+    def keyPressEvent(self, ev: QtGui.QKeyEvent) -> None:
+        if ev.isAutoRepeat():
+            return
+        if ev.key() == QtCore.Qt.Key_Space:
+            self._keys.clear()
+            if self._enabled:
+                self._bridge.publish_velocity(0.0, 0.0, 0.0)
+            return
+        self._keys.add(ev.key())
+
+    def keyReleaseEvent(self, ev: QtGui.QKeyEvent) -> None:
+        if ev.isAutoRepeat():
+            return
+        self._keys.discard(ev.key())
+
+
 class BoatUI(QtWidgets.QMainWindow):
     def __init__(self):
         super().__init__()
@@ -779,9 +887,11 @@ class BoatUI(QtWidgets.QMainWindow):
         self.sensor_tab = SensorTab(self._bridge)
         self.vehicle_tab = VehicleTab(self._bridge, self._mavros)
         self.mission_tab = MissionTab(self._bridge)
+        self.teleop_tab = TeleopTab(self._bridge)
         tabs.addTab(self.vehicle_tab, "Vehicle")
         tabs.addTab(self.sensor_tab, "Sensors")
         tabs.addTab(self.mission_tab, "Mission")
+        tabs.addTab(self.teleop_tab, "Teleop")
         self.setCentralWidget(tabs)
 
         self.status = self.statusBar()

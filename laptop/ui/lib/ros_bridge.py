@@ -13,7 +13,7 @@ from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Tuple
 
 import rclpy
-from geometry_msgs.msg import PoseStamped
+from geometry_msgs.msg import PoseStamped, Twist
 from mavros_msgs.msg import State, Waypoint
 from mavros_msgs.srv import CommandBool, CommandLong, SetMode, WaypointPush
 from rclpy.executors import MultiThreadedExecutor
@@ -76,6 +76,11 @@ class RosBridge:
         self._set_mode = self._node.create_client(SetMode, "/mavros/set_mode")
         self._cmd = self._node.create_client(CommandLong, "/mavros/cmd/command")
         self._wp_push = self._node.create_client(WaypointPush, "/mavros/mission/push")
+
+        # --- publishers ---
+        self._vel_pub = self._node.create_publisher(
+            Twist, "/mavros/setpoint_velocity/cmd_vel_unstamped", 10
+        )
 
         # --- executor thread ---
         self._executor = MultiThreadedExecutor(num_threads=2)
@@ -160,26 +165,51 @@ class RosBridge:
         res = fut.result()
         return bool(res.success), f"result={res.result}"
 
+    # Winch defaults (tweak if your PX4 maps AUX1 to a different servo number,
+    # or if the motor driver is polarity-flipped).
+    WINCH_SERVO = 9        # AUX1 on most Pixhawk FMUv5 builds
+    WINCH_PWM_NEUTRAL = 1500
+    WINCH_PWM_RANGE = 400  # ±400 µs → 1100..1900 at max speed
+    WINCH_FLIP = True      # True = positive value lowers, negative raises
+
     def winch_pwm(self, value: float, timeout: float = 2.0) -> Tuple[bool, str]:
-        """Send raw AUX1 PWM via MAV_CMD_DO_SET_SERVO (187) — matches roswinch.py."""
+        """Send AUX1 PWM via MAV_CMD_DO_SET_SERVO (187).
+
+        `value` is -1.0..+1.0 (UI sign convention: + = lower, - = raise).
+        We translate that to a microsecond PWM pulse around the 1500 neutral.
+        """
         if not self._cmd.wait_for_service(timeout_sec=timeout):
             return False, "cmd service unavailable"
+        # Clamp and map to PWM
+        v = max(min(float(value), 1.0), -1.0)
+        if self.WINCH_FLIP:
+            v = -v
+        pwm = int(round(self.WINCH_PWM_NEUTRAL + v * self.WINCH_PWM_RANGE))
+
         req = CommandLong.Request()
         req.broadcast = False
-        req.command = 187
+        req.command = 187               # MAV_CMD_DO_SET_SERVO
         req.confirmation = 0
-        req.param1 = float(-value)        # polarity-flipped like roswinch.py
-        req.param2 = float("nan")
-        req.param3 = float("nan")
-        req.param4 = float("nan")
-        req.param5 = float("nan")
-        req.param6 = float("nan")
+        req.param1 = float(self.WINCH_SERVO)
+        req.param2 = float(pwm)
+        req.param3 = 0.0
+        req.param4 = 0.0
+        req.param5 = 0.0
+        req.param6 = 0.0
         req.param7 = 0.0
         fut = self._cmd.call_async(req)
         if not self._wait(fut, timeout):
             return False, "cmd timeout"
         res = fut.result()
-        return bool(res.success), f"result={res.result}"
+        return bool(res.success), f"servo={self.WINCH_SERVO} pwm={pwm} result={res.result}"
+
+    def publish_velocity(self, vx: float, vy: float, wz: float) -> None:
+        """Publish one velocity setpoint (m/s, rad/s). Used by WASD teleop."""
+        msg = Twist()
+        msg.linear.x = float(vx)
+        msg.linear.y = float(vy)
+        msg.angular.z = float(wz)
+        self._vel_pub.publish(msg)
 
     def push_waypoints(
         self,
