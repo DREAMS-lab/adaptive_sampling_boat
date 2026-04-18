@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import logging
 import os
+import shutil
 import signal
 import subprocess
 import threading
@@ -27,12 +28,35 @@ DEFAULT_GCS = "udp://@localhost:14550"
 
 LOG_PATH = Path("/tmp/karin_mavros.log")
 
+# Try these in order; first one on PATH wins.
+TERMINAL_CANDIDATES = [
+    ("konsole", ["-e", "bash", "-c"]),
+    ("gnome-terminal", ["--", "bash", "-c"]),
+    ("xfce4-terminal", ["-e", "bash -c"]),
+    ("xterm", ["-e", "bash", "-c"]),
+]
+
+
+def _open_log_terminal() -> Optional[subprocess.Popen]:
+    """Open a terminal window tailing LOG_PATH. Returns the Popen or None."""
+    for exe, args in TERMINAL_CANDIDATES:
+        if shutil.which(exe):
+            cmd = [exe] + args + [f"echo '=== MAVROS log ({LOG_PATH}) ==='; tail -F {LOG_PATH}"]
+            log.info("opening log terminal: %s", exe)
+            try:
+                return subprocess.Popen(cmd, preexec_fn=os.setsid)
+            except Exception as e:
+                log.warning("terminal %s spawn failed: %s", exe, e)
+    log.warning("no terminal emulator found on PATH")
+    return None
+
 
 class MavrosLauncher:
     """Owns the MAVROS child process. Safe to call start()/stop() repeatedly."""
 
     def __init__(self) -> None:
         self._proc: Optional[subprocess.Popen] = None
+        self._term_proc: Optional[subprocess.Popen] = None
         self._lock = threading.Lock()
 
     # ------------------------------- api ------------------------------- #
@@ -70,17 +94,32 @@ class MavrosLauncher:
             except Exception as e:
                 return False, f"spawn failed: {e}"
 
+            # Spin up a terminal window tailing the log so the user can see output.
+            self._term_proc = _open_log_terminal()
+
         # Give it a moment to blow up if wrong args
         time.sleep(1.0)
         if not self.is_running():
             return False, f"MAVROS exited immediately — check {LOG_PATH}"
-        return True, f"MAVROS running (pid {self._proc.pid}), log → {LOG_PATH}"
+        msg = f"MAVROS running (pid {self._proc.pid})"
+        if self._term_proc is None:
+            msg += f"; no terminal found, log at {LOG_PATH}"
+        return True, msg
 
     def stop(self, timeout: float = 5.0) -> tuple[bool, str]:
         """Kill the launch process group (SIGINT first, SIGKILL if hung)."""
         with self._lock:
             proc = self._proc
+            term = self._term_proc
             self._proc = None
+            self._term_proc = None
+
+        # Close log terminal too
+        if term is not None and term.poll() is None:
+            try:
+                os.killpg(os.getpgid(term.pid), signal.SIGTERM)
+            except Exception:
+                pass
 
         if proc is None or proc.poll() is not None:
             return True, "was not running"
