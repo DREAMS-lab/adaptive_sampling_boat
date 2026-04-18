@@ -24,6 +24,21 @@ from std_msgs.msg import Float32, String
 
 log = logging.getLogger(__name__)
 
+# MAV_RESULT enum (MAVLink common.xml) — human labels for error messages.
+MAV_RESULT_NAMES = {
+    0: "ACCEPTED",
+    1: "TEMPORARILY_REJECTED (pre-arm check / safety switch / RC override)",
+    2: "DENIED (not permitted in this state)",
+    3: "UNSUPPORTED (firmware does not implement this command)",
+    4: "FAILED",
+    5: "IN_PROGRESS",
+    6: "CANCELLED",
+}
+
+
+def _result_name(r: int) -> str:
+    return MAV_RESULT_NAMES.get(r, f"result={r}")
+
 
 @dataclass
 class LatestState:
@@ -143,7 +158,8 @@ class RosBridge:
         if not self._wait(fut, timeout):
             return False, f"arming ACK timeout after {timeout}s (but the command may still have landed — check the armed indicator)"
         res = fut.result()
-        return bool(res.success), f"result={res.result}"
+        ok = bool(res.success) and res.result == 0
+        return ok, _result_name(res.result)
 
     def motor_test(
         self, motor: int, throttle_pct: float, duration_s: float, timeout: float = 3.0
@@ -163,7 +179,7 @@ class RosBridge:
         if not self._wait(fut, timeout):
             return False, "cmd timeout"
         res = fut.result()
-        return bool(res.success), f"result={res.result}"
+        return bool(res.success), _result_name(res.result)
 
     # Winch defaults (tweak from the UI or here). PX4 maps AUX1 to different
     # servo numbers depending on board/frame. Common choices:
