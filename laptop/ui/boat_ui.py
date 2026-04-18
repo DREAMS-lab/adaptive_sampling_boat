@@ -14,11 +14,17 @@ from typing import List, Optional, Tuple
 
 from PyQt5 import QtCore, QtGui, QtWidgets
 
+try:
+    import pyqtgraph as pg
+    _HAS_PYQTGRAPH = True
+except ImportError:   # venv not rebuilt; fall back to a plain label
+    _HAS_PYQTGRAPH = False
+
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from lib import odroid_ssh
 from lib.lawnmower import generate as lawnmower_generate
-from lib.mavros_launcher import DEFAULT_FCU, DEFAULT_GCS, MavrosLauncher
+from lib.mavros_launcher import MavrosLauncher
 from lib.mission_upload import preview_text
 from lib.ros_bridge import RosBridge
 from lib.setpoint_streamer import SetpointStreamer
@@ -257,29 +263,22 @@ class VehicleTab(QtWidgets.QWidget):
         grid = QtWidgets.QGridLayout(self)
         row = 0
 
-        # MAVROS launcher panel
-        mav_box = QtWidgets.QGroupBox("MAVROS (launches ros2 launch mavros px4.launch)")
-        mg = QtWidgets.QGridLayout(mav_box)
-        self.fcu_url = QtWidgets.QLineEdit(DEFAULT_FCU)
-        self.gcs_url = QtWidgets.QLineEdit(DEFAULT_GCS)
+        # MAVROS launcher panel (URLs hardcoded to sane defaults — edit
+        # DEFAULT_FCU / DEFAULT_GCS in lib/mavros_launcher.py if you need to)
+        mav_box = QtWidgets.QGroupBox("MAVROS")
+        mg = QtWidgets.QHBoxLayout(mav_box)
         start_mav = QtWidgets.QPushButton("Start MAVROS")
         stop_mav = QtWidgets.QPushButton("Stop MAVROS")
         start_mav.clicked.connect(self._start_mavros)
         stop_mav.clicked.connect(self._stop_mavros)
         self.mavros_dot = StatusDot()
         self.mavros_text = QtWidgets.QLabel("not launched")
-        mg.addWidget(QtWidgets.QLabel("fcu_url:"), 0, 0)
-        mg.addWidget(self.fcu_url, 0, 1, 1, 3)
-        mg.addWidget(QtWidgets.QLabel("gcs_url:"), 1, 0)
-        mg.addWidget(self.gcs_url, 1, 1, 1, 3)
-        mg.addWidget(start_mav, 2, 0)
-        mg.addWidget(stop_mav, 2, 1)
-        mg.addWidget(self.mavros_dot, 2, 2)
-        mg.addWidget(self.mavros_text, 2, 3)
-        mg.addWidget(QtWidgets.QLabel(
-            "Tip: with gcs_url set, QGC auto-connects on UDP 14550 (localhost). "
-            "Close QGC first if it's holding the serial port."
-        ), 3, 0, 1, 4)
+        mg.addWidget(start_mav)
+        mg.addWidget(stop_mav)
+        mg.addSpacing(20)
+        mg.addWidget(self.mavros_dot)
+        mg.addWidget(self.mavros_text)
+        mg.addStretch(1)
         grid.addWidget(mav_box, row, 0, 1, 4)
         row += 1
 
@@ -353,7 +352,7 @@ class VehicleTab(QtWidgets.QWidget):
     # --- actions --- #
 
     def _start_mavros(self) -> None:
-        ok, msg = self._mavros.start(self.fcu_url.text().strip(), self.gcs_url.text().strip())
+        ok, msg = self._mavros.start()   # uses DEFAULT_FCU / DEFAULT_GCS
         QtWidgets.QMessageBox.information(self, "MAVROS", msg)
 
     def _stop_mavros(self) -> None:
@@ -420,6 +419,62 @@ class VehicleTab(QtWidgets.QWidget):
 #                                 MISSION TAB                                  #
 # =========================================================================== #
 
+class LivePositionPlot(QtWidgets.QWidget):
+    """Shows the boat's local position as a moving dot + trail."""
+
+    TRAIL = 200
+
+    def __init__(self):
+        super().__init__()
+        layout = QtWidgets.QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+
+        self.gps_label = QtWidgets.QLabel("GPS: —")
+        layout.addWidget(self.gps_label)
+
+        if _HAS_PYQTGRAPH:
+            pg.setConfigOptions(antialias=True, background="w", foreground="k")
+            self._plot = pg.PlotWidget()
+            self._plot.setLabel("bottom", "x (m, local NED)")
+            self._plot.setLabel("left", "y (m, local NED)")
+            self._plot.showGrid(x=True, y=True, alpha=0.3)
+            self._plot.setAspectLocked(True)
+            self._trail = self._plot.plot([], [], pen=pg.mkPen(QtGui.QColor("#2060c0"), width=2))
+            self._dot = self._plot.plot([], [], pen=None,
+                symbol="o", symbolBrush=QtGui.QColor("#c03030"), symbolSize=14)
+            self._target_dot = self._plot.plot([], [], pen=None,
+                symbol="x", symbolBrush=QtGui.QColor("#30a030"), symbolSize=16)
+            layout.addWidget(self._plot)
+        else:
+            self._plot = None
+            layout.addWidget(QtWidgets.QLabel(
+                "(install pyqtgraph in the karin venv for the live position plot)"
+            ))
+
+        self._xs: List[float] = []
+        self._ys: List[float] = []
+
+    def update_position(self, x: float, y: float, target_xy: Optional[Tuple[float, float]] = None):
+        self._xs.append(x)
+        self._ys.append(y)
+        if len(self._xs) > self.TRAIL:
+            self._xs = self._xs[-self.TRAIL:]
+            self._ys = self._ys[-self.TRAIL:]
+        if self._plot is not None:
+            self._trail.setData(self._xs, self._ys)
+            self._dot.setData([x], [y])
+            if target_xy is not None:
+                self._target_dot.setData([target_xy[0]], [target_xy[1]])
+            else:
+                self._target_dot.setData([], [])
+
+    def update_gps(self, lat: float, lon: float) -> None:
+        if lat == 0.0 and lon == 0.0:
+            self.gps_label.setText("GPS: no fix")
+        else:
+            self.gps_label.setText(f"GPS: {lat:.6f}°, {lon:.6f}°")
+
+
 class MissionTab(QtWidgets.QWidget):
     def __init__(self, bridge: RosBridge):
         super().__init__()
@@ -427,10 +482,23 @@ class MissionTab(QtWidgets.QWidget):
         self._streamer: Optional[SetpointStreamer] = None
         self._mission: List[Tuple[float, float]] = []
 
-        outer = QtWidgets.QVBoxLayout(self)
-        outer.addWidget(self._build_position_controller())
-        outer.addWidget(self._build_mission_section())
-        outer.addStretch(1)
+        outer = QtWidgets.QHBoxLayout(self)
+
+        left = QtWidgets.QVBoxLayout()
+        left.addWidget(self._build_position_controller())
+        left.addWidget(self._build_mission_section())
+        left.addStretch(1)
+
+        # Live position panel (right half)
+        self.live_plot = LivePositionPlot()
+        right = QtWidgets.QVBoxLayout()
+        right.addWidget(QtWidgets.QLabel("<b>Live position</b>"))
+        right.addWidget(self.live_plot)
+
+        lw = QtWidgets.QWidget(); lw.setLayout(left)
+        rw = QtWidgets.QWidget(); rw.setLayout(right)
+        outer.addWidget(lw, 2)
+        outer.addWidget(rw, 3)
 
     # ---------- position controller ---------- #
 
@@ -591,6 +659,13 @@ class MissionTab(QtWidgets.QWidget):
 
     def refresh(self) -> None:
         self._refresh_streamer_display()
+        s = self._bridge.latest()
+        target_xy = None
+        if self._streamer and self._streamer.is_running():
+            t = self._streamer.target()
+            target_xy = (t.x, t.y)
+        self.live_plot.update_position(s.pose_x, s.pose_y, target_xy)
+        self.live_plot.update_gps(s.gps_lat, s.gps_lon)
 
 
 # =========================================================================== #

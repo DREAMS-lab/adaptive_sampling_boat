@@ -128,14 +128,15 @@ class RosBridge:
         res = fut.result()
         return bool(res.mode_sent), f"mode_sent={res.mode_sent}"
 
-    def arm(self, value: bool, timeout: float = 3.0) -> Tuple[bool, str]:
-        if not self._arming.wait_for_service(timeout_sec=timeout):
+    def arm(self, value: bool, timeout: float = 10.0) -> Tuple[bool, str]:
+        # MAVROS can take >5 s to ACK an arm (esp. with pre-arm checks).
+        if not self._arming.wait_for_service(timeout_sec=3.0):
             return False, "arming service unavailable"
         req = CommandBool.Request()
         req.value = bool(value)
         fut = self._arming.call_async(req)
         if not self._wait(fut, timeout):
-            return False, "arming timeout"
+            return False, f"arming ACK timeout after {timeout}s (but the command may still have landed — check the armed indicator)"
         res = fut.result()
         return bool(res.success), f"result={res.result}"
 
