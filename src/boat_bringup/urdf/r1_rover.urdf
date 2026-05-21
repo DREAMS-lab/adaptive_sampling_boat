@@ -1,0 +1,188 @@
+<?xml version="1.0"?>
+<robot name="r1_rover">
+  
+  <!-- Base Link -->
+  <link name="base_link">
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="package://boat_bringup/urdf/meshes/chassis_link.STL" scale="1 1 1"/>
+      </geometry>
+      <material name="white">
+        <color rgba="1.0 1.0 1.0 1.0"/>
+      </material>
+    </visual>
+  </link>
+
+  <!-- Top Link -->
+  <link name="top_link">
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="package://boat_bringup/urdf/meshes/top_link.STL" scale="1 1 1"/>
+      </geometry>
+      <material name="white">
+        <color rgba="1.0 1.0 1.0 1.0"/>
+      </material>
+    </visual>
+  </link>
+
+  <joint name="base_to_top" type="fixed">
+    <parent link="base_link"/>
+    <child link="top_link"/>
+    <origin xyz="0 0 0.114486" rpy="0 0 0"/>
+  </joint>
+
+  <!-- Battery Link -->
+  <link name="battery_link">
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="package://boat_bringup/urdf/meshes/battery_link.STL" scale="1 1 1"/>
+      </geometry>
+      <material name="black">
+        <color rgba="0.0 0.0 0.0 1.0"/>
+      </material>
+    </visual>
+  </link>
+
+  <joint name="top_to_battery" type="fixed">
+    <parent link="top_link"/>
+    <child link="battery_link"/>
+    <origin xyz="-0.09302 -0.000128 0" rpy="0 0 0"/>
+  </joint>
+
+  <!-- Housing Link -->
+  <link name="housing_link">
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="package://boat_bringup/urdf/meshes/housing_link.STL" scale="1 1 1"/>
+      </geometry>
+      <material name="black">
+        <color rgba="0.0 0.0 0.0 1.0"/>
+      </material>
+    </visual>
+  </link>
+
+  <joint name="top_to_housing" type="fixed">
+    <parent link="top_link"/>
+    <child link="housing_link"/>
+    <origin xyz="0.03473 0 0" rpy="0 0 0"/>
+  </joint>
+
+  <!-- Left Front Wheel -->
+  <link name="lf_wheel_link">
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="package://boat_bringup/urdf/meshes/wheel_link.STL" scale="1 1 1"/>
+      </geometry>
+      <material name="black">
+        <color rgba="0.0 0.0 0.0 1.0"/>
+      </material>
+    </visual>
+  </link>
+
+  <joint name="base_to_lf_wheel" type="fixed">
+    <parent link="base_link"/>
+    <child link="lf_wheel_link"/>
+    <origin xyz="0.15 0.16317 0.0215" rpy="0 0 0"/>
+  </joint>
+
+  <!-- Left Back Wheel -->
+  <link name="lb_wheel_link">
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="package://boat_bringup/urdf/meshes/wheel_link.STL" scale="1 1 1"/>
+      </geometry>
+      <material name="black">
+        <color rgba="0.0 0.0 0.0 1.0"/>
+      </material>
+    </visual>
+  </link>
+
+  <joint name="base_to_lb_wheel" type="fixed">
+    <parent link="base_link"/>
+    <child link="lb_wheel_link"/>
+    <origin xyz="-0.15 0.16317 0.0215" rpy="0 0 0"/>
+  </joint>
+
+  <!-- Right Front Wheel -->
+  <link name="rf_wheel_link">
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="package://boat_bringup/urdf/meshes/wheel_link.STL" scale="1 1 1"/>
+      </geometry>
+      <material name="black">
+        <color rgba="0.0 0.0 0.0 1.0"/>
+      </material>
+    </visual>
+  </link>
+
+  <joint name="base_to_rf_wheel" type="fixed">
+    <parent link="base_link"/>
+    <child link="rf_wheel_link"/>
+    <origin xyz="0.15 -0.16317 0.0215" rpy="0 0 0"/>
+  </joint>
+
+  <!-- Right Back Wheel -->
+  <link name="rb_wheel_link">
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="package://boat_bringup/urdf/meshes/wheel_link.STL" scale="1 1 1"/>
+      </geometry>
+      <material name="black">
+        <color rgba="0.0 0.0 0.0 1.0"/>
+      </material>
+    </visual>
+  </link>
+
+  <joint name="base_to_rb_wheel" type="fixed">
+    <parent link="base_link"/>
+    <child link="rb_wheel_link"/>
+    <origin xyz="-0.15 -0.16317 0.0215" rpy="0 0 0"/>
+  </joint>
+
+  <!-- Left Antenna -->
+  <link name="l_antenna_link">
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="package://boat_bringup/urdf/meshes/antenna_link.STL" scale="1 1 1"/>
+      </geometry>
+      <material name="black">
+        <color rgba="0.0 0.0 0.0 1.0"/>
+      </material>
+    </visual>
+  </link>
+
+  <joint name="top_to_l_antenna" type="fixed">
+    <parent link="top_link"/>
+    <child link="l_antenna_link"/>
+    <origin xyz="-0.1565 0.0762 0" rpy="0 0 0"/>
+  </joint>
+
+  <!-- Right Antenna -->
+  <link name="r_antenna_link">
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="package://boat_bringup/urdf/meshes/antenna_link.STL" scale="1 1 1"/>
+      </geometry>
+      <material name="black">
+        <color rgba="0.0 0.0 0.0 1.0"/>
+      </material>
+    </visual>
+  </link>
+
+  <joint name="top_to_r_antenna" type="fixed">
+    <parent link="top_link"/>
+    <child link="r_antenna_link"/>
+    <origin xyz="-0.1565 -0.0762 0" rpy="0 0 0"/>
+  </joint>
+
+</robot>

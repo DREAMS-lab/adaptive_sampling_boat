@@ -1,3 +1,0 @@
-[submodule "odroid/scripts/external/mavros"]
-	path = odroid/scripts/external/mavros
-	url = git@github.com:mavlink/mavros.git
